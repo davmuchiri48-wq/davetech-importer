@@ -74,7 +74,19 @@ function baseParams(): Record<string, string> {
   };
 }
 
+const RSP_HINTS: Record<string, string> = {
+  ITEM_ID_NOT_FOUND: 'This product is not available for dropshipping (removed, or not sold to your country). Try another listing.',
+};
+
 function extractError(body: any): string | null {
+  // Business errors come back with HTTP 200 inside *_response: { rsp_code, rsp_msg } or result.{code,msg}
+  for (const [k, v] of Object.entries(body || {})) {
+    if (!k.endsWith('_response') || !v || typeof v !== 'object') continue;
+    const r: any = v;
+    const code = r.rsp_code ?? r.result?.rsp_code ?? r.resp_code;
+    const msg = r.rsp_msg ?? r.result?.rsp_msg ?? r.resp_msg;
+    if (code != null && String(code) !== '200' && String(code) !== '0' && msg) return `${msg} (${code})${RSP_HINTS[msg] ? ` — ${RSP_HINTS[msg]}` : ''}`;
+  }
   const er = body?.error_response || (body?.code && body.code !== '0' && body?.message ? body : null);
   if (er) return `${er.code || ''} ${er.msg || er.message || ''} ${er.sub_msg || ''}`.trim();
   return null;
@@ -93,7 +105,7 @@ export async function callApi(method: string, params: Record<string, unknown>, a
   const err = extractError(body);
   if (err || status >= 400) {
     const msg = err || `HTTP ${status}`;
-    const reason = /permission|InsufficientPermission|isv\.|not.*authori|AppKey.*not|api.*not.*exist|InvalidApiPath/i.test(msg)
+    const reason = /ITEM_ID_NOT_FOUND/.test(msg) ? 'api_error' : /permission|InsufficientPermission|isv\.|not.*authori|AppKey.*not|api.*not.*exist|InvalidApiPath/i.test(msg)
       ? 'unsupported' : /session|token|IllegalAccessToken/i.test(msg) ? 'not_authorized'
         : /limit|frequency/i.test(msg) ? 'rate_limited' : 'api_error';
     return { ok: false, reason, apiMethod: method, message: `AliExpress said: ${msg}`, raw: body };

@@ -87,7 +87,7 @@ export default function Integrations() {
               )}
               {ae.data.authorized && (
                 <div className="mt-4 space-y-2">
-                  <div className="flex gap-2"><input className="input" placeholder="Optional: a product id to test details" value={probe} onChange={(e) => setProbe(e.target.value)} /><Button variant="secondary" loading={busy === 'test'} onClick={() => run('test', async () => setTest(await api('/aliexpress/test', { body: { productId: probe } })))}>Test API</Button></div>
+                  <div className="flex gap-2"><input className="input" placeholder="Optional: a product id (empty = test with a search result)" value={probe} onChange={(e) => setProbe(e.target.value)} /><Button variant="secondary" loading={busy === 'test'} onClick={() => run('test', async () => setTest(await api('/aliexpress/test', { body: { productId: probe } })))}>Test API</Button></div>
                   {test && Object.entries(test.results).map(([k, v]: any) => <div key={k} className="flex items-start gap-2 text-sm">{v.ok ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : <XCircle className="h-4 w-4 text-red-600" />}<span><b>{k}</b> {v.ok ? `works — ${v.message || ''}` : v.message}</span></div>)}
                 </div>
               )}
