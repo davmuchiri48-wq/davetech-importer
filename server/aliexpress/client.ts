@@ -32,21 +32,25 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const SYS_KEYS = new Set(['app_key', 'timestamp', 'sign_method', 'sign', 'method', 'session', 'access_token', 'simplify', 'format', 'partner_id']);
 
-async function post(url: string, params: Record<string, string>, allInUrl = false): Promise<{ status: number; body: any }> {
+export type Layout = 'body' | 'url' | 'split' | 'get';
+export let defaultLayout: Layout = (process.env.ALIEXPRESS_LAYOUT as Layout) || 'body';
+
+async function post(url: string, params: Record<string, string>, allInUrl = false, layout?: Layout): Promise<{ status: number; body: any }> {
+  if (layout) allInUrl = layout === 'url' || layout === 'get';
   // Business APIs (/sync): every parameter in the URL — some APIs (e.g. ds.product.get) only read the query string.
   // System APIs (/rest, token calls): system params in the URL, the rest in the form body (IOP SDK layout).
   const sys = new URLSearchParams(), api = new URLSearchParams();
-  for (const [k, v] of Object.entries(params)) (allInUrl || SYS_KEYS.has(k) ? sys : api).set(k, v);
+  for (const [k, v] of Object.entries(params)) ((layout === 'body' ? false : (allInUrl || SYS_KEYS.has(k))) ? sys : api).set(k, v);
   const fullUrl = `${url}?${sys.toString()}`;
   for (let attempt = 1; ; attempt++) {
     const wait = lastCall + MIN_GAP_MS - Date.now();
     if (wait > 0) await sleep(wait);
     lastCall = Date.now();
     try {
-      const res = await fetch(fullUrl, {
-        method: 'POST',
+      const res = await fetch(sys.toString() ? fullUrl : url, {
+        method: layout === 'get' ? 'GET' : 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=utf-8' },
-        body: api.toString(),
+        body: layout === 'get' ? undefined : api.toString(),
         signal: AbortSignal.timeout(25_000),
       });
       const text = await res.text();
@@ -77,15 +81,15 @@ function extractError(body: any): string | null {
 }
 
 /** Call a business API (e.g. aliexpress.ds.product.get). */
-export async function callApi(method: string, params: Record<string, unknown>, accessToken?: string): Promise<AeResult<any>> {
+export async function callApi(method: string, params: Record<string, unknown>, accessToken?: string, layout: Layout = defaultLayout): Promise<AeResult<any>> {
   if (!aliexpressConfigured()) {
     return { ok: false, reason: 'not_configured', apiMethod: method, message: 'AliExpress App Key and App Secret are not set on the server (ALIEXPRESS_APP_KEY / ALIEXPRESS_APP_SECRET).' };
   }
-  const p: Record<string, string> = { ...baseParams(), method };
+  const p: Record<string, string> = { ...baseParams(), method, format: 'json', simplify: 'false' };
   if (accessToken) p.session = accessToken;
   for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null) p[k] = typeof v === 'object' ? JSON.stringify(v) : String(v);
   p.sign = sign(p, config.aliexpress.appSecret);
-  const { status, body } = await post(`${config.aliexpress.gateway}/sync`, p, true);
+  const { status, body } = await post(`${config.aliexpress.gateway}/sync`, p, true, layout);
   const err = extractError(body);
   if (err || status >= 400) {
     const msg = err || `HTTP ${status}`;

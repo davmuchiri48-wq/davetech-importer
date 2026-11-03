@@ -199,6 +199,15 @@ api.post('/aliexpress/test', h(async (req, res) => {
     ...(probe ? [['getProductDetails', () => aliexpress.getProductDetails(req.storeId, probe)] as [string, () => Promise<any>]] : []),
   ];
   if (!token) { res.json({ authorized: false, results: {}, message: 'Connect your AliExpress account first.' }); return; }
+  if (probe) {
+    // Diagnose which request layout AliExpress accepts for product details.
+    const { callApi: raw } = await import('../aliexpress/client.js');
+    for (const layout of ['body', 'split', 'url', 'get'] as const) {
+      const r = await raw(AE_METHODS.getProductDetails, { product_id: probe, ship_to_country: config.aliexpress.shipTo, target_currency: config.aliexpress.targetCurrency, target_language: config.aliexpress.targetLanguage }, token, layout);
+      const title = r.ok ? (r.data?.aliexpress_ds_product_get_response?.result?.ae_item_base_info_dto?.subject || JSON.stringify(r.data).slice(0, 120)) : '';
+      results[`layout:${layout}`] = r.ok ? { ok: true, message: String(title).slice(0, 80) } : { ok: false, reason: r.reason, message: r.message };
+    }
+  }
   for (const [name, fn] of calls) {
     const r = await fn();
     if (!r.ok) { results[name] = { ok: false, reason: r.reason, message: r.message }; continue; }
