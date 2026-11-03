@@ -32,10 +32,11 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const SYS_KEYS = new Set(['app_key', 'timestamp', 'sign_method', 'sign', 'method', 'session', 'access_token', 'simplify', 'format', 'partner_id']);
 
-async function post(url: string, params: Record<string, string>): Promise<{ status: number; body: any }> {
-  // Official IOP SDK layout: system parameters go in the URL, API parameters in the form body.
+async function post(url: string, params: Record<string, string>, allInUrl = false): Promise<{ status: number; body: any }> {
+  // Business APIs (/sync): every parameter in the URL — some APIs (e.g. ds.product.get) only read the query string.
+  // System APIs (/rest, token calls): system params in the URL, the rest in the form body (IOP SDK layout).
   const sys = new URLSearchParams(), api = new URLSearchParams();
-  for (const [k, v] of Object.entries(params)) (SYS_KEYS.has(k) ? sys : api).set(k, v);
+  for (const [k, v] of Object.entries(params)) (allInUrl || SYS_KEYS.has(k) ? sys : api).set(k, v);
   const fullUrl = `${url}?${sys.toString()}`;
   for (let attempt = 1; ; attempt++) {
     const wait = lastCall + MIN_GAP_MS - Date.now();
@@ -84,7 +85,7 @@ export async function callApi(method: string, params: Record<string, unknown>, a
   if (accessToken) p.session = accessToken;
   for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null) p[k] = typeof v === 'object' ? JSON.stringify(v) : String(v);
   p.sign = sign(p, config.aliexpress.appSecret);
-  const { status, body } = await post(`${config.aliexpress.gateway}/sync`, p);
+  const { status, body } = await post(`${config.aliexpress.gateway}/sync`, p, true);
   const err = extractError(body);
   if (err || status >= 400) {
     const msg = err || `HTTP ${status}`;
