@@ -79,5 +79,6 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
     return res.status(err.status).json({ error: err.message, code: err.code, details: err.details });
   }
   console.error(err);
-  res.status(500).json({ error: 'Something went wrong on the server', code: 'server_error' });
+  const msg = (err as any)?.message ? String((err as any).message).slice(0, 300) : '';
+  res.status(500).json({ error: `Something went wrong on the server${msg ? `: ${msg}` : ''}`, code: 'server_error' });
 }

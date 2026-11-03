@@ -55,7 +55,7 @@ The app never invents data. If AliExpress doesn't supply a stock figure, the sto
    firebase use --add          # pick your project
    firebase deploy --only firestore:rules,firestore:indexes
    ```
-   If you can't use a computer, copy `firestore.rules` into **Firestore → Rules → Publish**. Then, the first time the dashboard shows an error that mentions "index", open the link in that error. Firebase will create the missing index for you.
+   If you can't use a computer, copy `firestore.rules` into **Firestore → Rules → Publish**. No extra indexes are needed, because the app sorts results itself.
 
 ### 2. Update DaveTech Shop
 1. Deploy the updated `davetech-shop` code. It adds the integration API, the product image gallery and the safer M-Pesa confirmation.

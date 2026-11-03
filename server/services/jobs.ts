@@ -30,9 +30,10 @@ export async function drain() {
   running = true;
   try {
     for (;;) {
-      const q = await col.importJobs().where('status', 'in', ['queued', 'running']).orderBy('createdAt').limit(5).get();
+      const q = await col.importJobs().where('status', 'in', ['queued', 'running']).get();
       if (q.empty) break;
-      for (const d of q.docs) await runJob(d.id, d.data() as ImportJob);
+      const next = q.docs.sort((a, b) => String(a.get('createdAt')).localeCompare(String(b.get('createdAt')))).slice(0, 5);
+      for (const d of next) await runJob(d.id, d.data() as ImportJob);
     }
   } catch (e) {
     console.error('[queue]', e);

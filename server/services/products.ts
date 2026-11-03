@@ -37,8 +37,9 @@ export async function getProduct(storeId: string, id: string): Promise<Product> 
 /** Finds the store category mapped to an AliExpress category name, if any. */
 async function mapCategory(storeId: string, supplierCategory?: string): Promise<string | null> {
   if (!supplierCategory) return null;
-  const q = await col.categories().where('storeId', '==', storeId).where('supplierCategoryNames', 'array-contains', supplierCategory).limit(1).get();
-  return q.empty ? null : q.docs[0].id;
+  const q = await col.categories().where('storeId', '==', storeId).get();
+  const hit = q.docs.find((d) => (d.get('supplierCategoryNames') || []).includes(supplierCategory));
+  return hit ? hit.id : null;
 }
 
 export async function priceFor(storeId: string, p: Pick<Product, 'supplier' | 'categoryId' | 'pricingOverride' | 'manualPrice' | 'priceLocked'>) {

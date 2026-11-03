@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import crypto from 'node:crypto';
 import { z } from 'zod';
-import { col, db, nowIso } from '../firebase.js';
+import { col, db, nowIso, newest } from '../firebase.js';
 import { h, HttpError, requireAuth, requireRole, requireStore, type AuthedRequest } from '../http.js';
 import { encrypt } from '../crypto.js';
 import { config } from '../config.js';
@@ -92,11 +92,12 @@ api.post('/store/test', h(async (req, res) => { res.json(await shop.health(req.s
 // ---------------- overview
 api.get('/overview', h(async (req, res) => {
   const s = req.storeId;
-  const [prods, jobs, notes] = await Promise.all([
+  const [prods, allJobs, notes] = await Promise.all([
     col.products().where('storeId', '==', s).get(),
-    col.importJobs().where('storeId', '==', s).orderBy('createdAt', 'desc').limit(8).get(),
-    col.notifications().where('storeId', '==', s).orderBy('at', 'desc').limit(8).get(),
+    newest(col.importJobs().where('storeId', '==', s), 'createdAt', 1000),
+    newest(col.notifications().where('storeId', '==', s), 'at', 8),
   ]);
+  const jobs = { docs: allJobs.slice(0, 8) };
   const p = prods.docs.map((d) => d.data());
   let orders: ShopOrder[] = []; let shopError: string | null = null;
   try { orders = (await shop.orders(s, { limit: 500 })).orders; } catch (e) { shopError = (e as Error).message; }
@@ -107,7 +108,7 @@ api.get('/overview', h(async (req, res) => {
     cards: {
       totalProducts: p.length,
       publishedProducts: p.filter((x) => x.status === 'published').length,
-      pendingImports: (await col.importJobs().where('storeId', '==', s).where('status', 'in', ['queued', 'running']).count().get()).data().count,
+      pendingImports: allJobs.filter((d) => ['queued', 'running'].includes(d.get('status'))).length,
       totalOrders: orders.length,
       pendingSupplierOrders: paid.filter((o) => o.items.some((i) => i.dropship) && !o.supplier_order_no).length,
       totalSales: sales,
@@ -117,7 +118,7 @@ api.get('/overview', h(async (req, res) => {
     salesByDay: groupByDay(paid),
     recentImports: jobs.docs.map((d) => ({ id: d.id, ...d.data() })),
     recentOrders: orders.slice(0, 8),
-    alerts: notes.docs.map((d) => ({ id: d.id, ...d.data() })),
+    alerts: notes.map((d) => ({ id: d.id, ...d.data() })),
     shopError,
   });
 }));
@@ -262,8 +263,8 @@ api.post('/imports/manual', h(async (req, res) => {
   res.json({ job });
 }));
 api.get('/imports', h(async (req, res) => {
-  const q = await col.importJobs().where('storeId', '==', req.storeId).orderBy('createdAt', 'desc').limit(100).get();
-  res.json({ jobs: q.docs.map((d) => ({ id: d.id, ...d.data(), input: undefined })) });
+  const q = await newest(col.importJobs().where('storeId', '==', req.storeId), 'createdAt', 100);
+  res.json({ jobs: q.map((d) => ({ id: d.id, ...d.data(), input: undefined })) });
 }));
 
 // ---------------- products
@@ -274,8 +275,8 @@ api.get('/products', h(async (req, res) => {
 }));
 api.get('/products/:id', h(async (req, res) => {
   const p = await products.getProduct(req.storeId, req.params.id);
-  const history = await col.syncJobs().where('storeId', '==', req.storeId).where('productId', '==', p.id).orderBy('at', 'desc').limit(20).get();
-  res.json({ product: p, syncHistory: history.docs.map((d) => d.data()) });
+  const history = await newest(col.syncJobs().where('storeId', '==', req.storeId).where('productId', '==', p.id), 'at', 20);
+  res.json({ product: p, syncHistory: history.map((d) => d.data()) });
 }));
 const productPatch = z.object({
   name: z.string().min(2).max(200), description: z.string().max(50_000), images: z.array(z.string().url()).max(20), mainImage: z.string(),
@@ -367,8 +368,8 @@ api.post('/sync/run', h(async (req, res) => {
   res.json(summary);
 }));
 api.get('/sync/history', h(async (req, res) => {
-  const q = await col.syncJobs().where('storeId', '==', req.storeId).orderBy('at', 'desc').limit(100).get();
-  res.json({ history: q.docs.map((d) => ({ id: d.id, ...d.data() })) });
+  const q = await newest(col.syncJobs().where('storeId', '==', req.storeId), 'at', 100);
+  res.json({ history: q.map((d) => ({ id: d.id, ...d.data() })) });
 }));
 
 // ---------------- orders (live from the shop; snapshotted to Firestore for history)
@@ -410,12 +411,12 @@ api.patch('/orders/:code', h(async (req, res) => {
 
 // ---------------- notifications
 api.get('/notifications', h(async (req, res) => {
-  const q = await col.notifications().where('storeId', '==', req.storeId).orderBy('at', 'desc').limit(50).get();
-  res.json({ notifications: q.docs.map((d) => ({ id: d.id, ...d.data() })) });
+  const q = await newest(col.notifications().where('storeId', '==', req.storeId), 'at', 50);
+  res.json({ notifications: q.map((d) => ({ id: d.id, ...d.data() })) });
 }));
 api.post('/notifications/read-all', h(async (req, res) => {
-  const q = await col.notifications().where('storeId', '==', req.storeId).where('read', '==', false).limit(400).get();
-  const b = db.batch(); q.docs.forEach((d) => b.update(d.ref, { read: true })); await b.commit();
+  const q = await newest(col.notifications().where('storeId', '==', req.storeId), 'at', 400, (d) => d.read === false);
+  const b = db.batch(); q.forEach((d) => b.update(d.ref, { read: true })); await b.commit();
   res.json({ ok: true });
 }));
 
@@ -441,6 +442,6 @@ api.put('/team/:uid', admin, h(async (req, res) => {
   res.json({ ok: true });
 }));
 api.get('/audit', admin, h(async (req, res) => {
-  const q = await col.auditLogs().where('storeId', '==', req.storeId).orderBy('at', 'desc').limit(200).get();
-  res.json({ logs: q.docs.map((d) => ({ id: d.id, ...d.data() })) });
+  const q = await newest(col.auditLogs().where('storeId', '==', req.storeId), 'at', 200);
+  res.json({ logs: q.map((d) => ({ id: d.id, ...d.data() })) });
 }));

@@ -35,3 +35,15 @@ export const col = {
   notifications: () => db.collection('notifications'),
   auditLogs: () => db.collection('auditLogs'),
 };
+
+/**
+ * Runs an equality-only query and sorts newest-first in memory, so Firestore never needs
+ * composite indexes (nothing extra to set up). Fine for the data sizes of one shop.
+ */
+export async function newest(q: FirebaseFirestore.Query, field: string, limit: number, filter?: (d: FirebaseFirestore.DocumentData) => boolean) {
+  const snap = await q.get();
+  return snap.docs
+    .filter((d) => !filter || filter(d.data()))
+    .sort((a, b) => String(b.get(field) ?? '').localeCompare(String(a.get(field) ?? '')))
+    .slice(0, limit);
+}
