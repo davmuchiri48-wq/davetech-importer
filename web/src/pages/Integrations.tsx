@@ -26,7 +26,7 @@ export function ConnectStore({ first, existing }: { first?: boolean; existing?: 
       <form className="space-y-3" onSubmit={submit}>
         <Field label="Store name"><input className="input" required value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field>
         <Field label="Shop address"><input className="input" type="url" required value={f.baseUrl} onChange={(e) => setF({ ...f, baseUrl: e.target.value })} /></Field>
-        <Field label={existing ? 'New API key (leave empty to keep the current one)' : 'Shop API key (IMPORTER_API_KEY)'}><input className="input font-mono" type="password" required={!existing} minLength={16} autoComplete="off" value={f.apiKey} onChange={(e) => setF({ ...f, apiKey: e.target.value })} /></Field>
+        <Field label={existing ? 'New API key (leave empty to keep the current one)' : 'Shop API key (IMPORTER_API_KEY)'}><input className="input font-mono" type="password" required={!existing} minLength={16} autoComplete="new-password" name="shop-api-key" value={f.apiKey} onChange={(e) => setF({ ...f, apiKey: e.target.value })} /></Field>
         {err && <ErrorBox error={err} />}
         <Button loading={busy}>{existing ? 'Save & test' : 'Connect & test'}</Button>
         <p className="text-xs text-slate-500">The key is encrypted on the server and never shown again. A free Render shop may take up to a minute to wake up.</p>
