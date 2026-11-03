@@ -85,7 +85,7 @@ function extractError(body: any): string | null {
     const r: any = v;
     const code = r.rsp_code ?? r.result?.rsp_code ?? r.resp_code;
     const msg = r.rsp_msg ?? r.result?.rsp_msg ?? r.resp_msg;
-    if (code != null && String(code) !== '200' && String(code) !== '0' && msg) return `${msg} (${code})${RSP_HINTS[msg] ? ` — ${RSP_HINTS[msg]}` : ''}`;
+    if (code != null && !['200', '0', '00', 'success'].includes(String(code).toLowerCase()) && msg) return `${msg} (${code})${RSP_HINTS[msg] ? ` — ${RSP_HINTS[msg]}` : ''}`;
   }
   const er = body?.error_response || (body?.code && body.code !== '0' && body?.message ? body : null);
   if (er) return `${er.code || ''} ${er.msg || er.message || ''} ${er.sub_msg || ''}`.trim();
