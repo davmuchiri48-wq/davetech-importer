@@ -30,16 +30,22 @@ let lastCall = 0;
 const MIN_GAP_MS = 250;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+const SYS_KEYS = new Set(['app_key', 'timestamp', 'sign_method', 'sign', 'method', 'session', 'access_token', 'simplify', 'format', 'partner_id']);
+
 async function post(url: string, params: Record<string, string>): Promise<{ status: number; body: any }> {
+  // Official IOP SDK layout: system parameters go in the URL, API parameters in the form body.
+  const sys = new URLSearchParams(), api = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) (SYS_KEYS.has(k) ? sys : api).set(k, v);
+  const fullUrl = `${url}?${sys.toString()}`;
   for (let attempt = 1; ; attempt++) {
     const wait = lastCall + MIN_GAP_MS - Date.now();
     if (wait > 0) await sleep(wait);
     lastCall = Date.now();
     try {
-      const res = await fetch(url, {
+      const res = await fetch(fullUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=utf-8' },
-        body: new URLSearchParams(params).toString(),
+        body: api.toString(),
         signal: AbortSignal.timeout(25_000),
       });
       const text = await res.text();

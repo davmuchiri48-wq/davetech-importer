@@ -201,7 +201,10 @@ api.post('/aliexpress/test', h(async (req, res) => {
   if (!token) { res.json({ authorized: false, results: {}, message: 'Connect your AliExpress account first.' }); return; }
   for (const [name, fn] of calls) {
     const r = await fn();
-    results[name] = r.ok ? { ok: true } : { ok: false, reason: r.reason, message: r.message };
+    if (!r.ok) { results[name] = { ok: false, reason: r.reason, message: r.message }; continue; }
+    const detail = name === 'searchProducts' ? `${r.data.items.length} products found for "phone case"` : `"${String(r.data.title).slice(0, 60)}" — ${r.data.images.length} images, ${r.data.variants.length} variants`;
+    const empty = name === 'searchProducts' && r.data.items.length === 0;
+    results[name] = empty ? { ok: false, reason: 'api_error', message: 'Search returned 0 products — parameters may not be reaching AliExpress' } : { ok: true, message: detail };
   }
   res.json({ authorized: true, results });
 }));
