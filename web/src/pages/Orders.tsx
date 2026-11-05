@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ExternalLink, Download, RefreshCw, Copy } from 'lucide-react';
+import { ExternalLink, Download, RefreshCw, Copy, MessageCircle, CheckCircle2 } from 'lucide-react';
 import { api } from '../lib/api';
 import { money, date, downloadCsv } from '../lib/format';
 import { useSession } from '../lib/session';
 import { Badge, Button, Card, Drawer, Empty, ErrorBox, Field, Notice, PageHeader, Skeleton, Stat, statusTone, useUi } from '../components/ui';
-import type { ShopOrder } from '../../../shared/types';
+import { whatsappLink, type ShopOrder, type LocalSupplier, type Product } from '../../../shared/types';
+import { useApiData } from '../components/ui';
 
 const STATUSES = ['new', 'processing', 'shipped', 'delivered', 'cancelled'];
 const isPaid = (o: ShopOrder) => o.payment_status === 'paid';
@@ -71,6 +72,7 @@ function OrderDrawer({ order, onClose }: { order: ShopOrder | null; onClose: () 
           ))}
           <div className="mt-2 space-y-0.5 text-right"><div>Subtotal {money(order.subtotal, cur)}</div><div>Delivery {money(order.delivery, cur)}</div><div className="font-semibold">Total {money(order.total, cur)}</div></div>
         </Card>
+        <LocalSupplierPanel order={order} canOrder={canOrder} onOrdered={async (no) => { setF((x) => ({ ...x, supplier_order_no: no })); await loadOrders(true); }} />
         {order.items.some((i) => i.dropship) && (
           <Card title="Supplier order (manual)">
             {!canOrder && <div className="mb-3"><Notice tone="warning">Customer payment is <b>not verified</b>. Do not buy from the supplier yet.</Notice></div>}
@@ -139,7 +141,7 @@ export function SupplierOrders() {
         const waiting = orders.filter((o) => needsSupplierOrder(o) && !isPaid(o) && o.payment_method !== 'cod');
         const placed = orders.filter((o) => o.supplier_order_no && o.status !== 'delivered');
         return <>
-          <Notice>Mode: <b>Manual</b>. Automatic AliExpress ordering is switched off until your app has the ordering API approved and Phase 6 is enabled — see Automation Center.</Notice>
+          <Notice><b>Local supplier items:</b> open the order and tap <b>WhatsApp supplier</b> — the message with items, quantities and prices is written for you. Mode: <b>Manual</b>. Automatic AliExpress ordering is switched off until your app has the ordering API approved and Phase 6 is enabled — see Automation Center.</Notice>
           <h2 className="mb-2 mt-5 font-semibold">Ready to order — payment verified ({ready.length})</h2>
           <OrdersTable orders={ready} onOpen={setOpen} cur={cur} />
           <h2 className="mb-2 mt-6 font-semibold">Waiting for payment ({waiting.length})</h2>
@@ -226,5 +228,94 @@ export function Payments() {
         </>;
       }}
     </OrdersShell>
+  );
+}
+
+// ------------------------------------------------------------------ local supplier WhatsApp ordering
+function LocalSupplierPanel({ order, canOrder, onOrdered }: { order: ShopOrder; canOrder: boolean; onOrdered: (supplierOrderNo: string) => Promise<void> }) {
+  const { store } = useSession();
+  const { toast } = useUi();
+  const cat = useApiData(async () => {
+    const [p, s] = await Promise.all([api<{ products: Product[] }>('/products'), api<{ suppliers: LocalSupplier[] }>('/suppliers')]);
+    return { products: p.products, suppliers: s.suppliers };
+  }, [store?.id, order.code]);
+  const [deliver, setDeliver] = useState<Record<string, boolean>>({});
+  const [busy, setBusy] = useState<string | null>(null);
+  if (!cat.data) return null;
+
+  const byId = new Map(cat.data.products.map((p) => [p.id, p]));
+  const sups = new Map(cat.data.suppliers.map((x) => [x.id, x]));
+  const groups = new Map<string, { supplier: LocalSupplier; lines: { item: ShopOrder['items'][number]; product: Product }[] }>();
+  for (const item of order.items) {
+    const product = item.external_id ? byId.get(item.external_id) : undefined;
+    const supplier = product?.supplierId ? sups.get(product.supplierId) : undefined;
+    if (!product || !supplier) continue;
+    const g = groups.get(supplier.id) || { supplier, lines: [] };
+    g.lines.push({ item, product });
+    groups.set(supplier.id, g);
+  }
+  if (!groups.size) return null;
+  const cur = store?.currency || 'KES';
+  const tagFor = (s: LocalSupplier) => `LOCAL-${s.name.toUpperCase().replace(/[^A-Z0-9]+/g, '-').slice(0, 30)}`;
+
+  const message = (s: LocalSupplier, lines: { item: ShopOrder['items'][number]; product: Product }[], delivers: boolean) => {
+    const total = lines.reduce((a, l) => a + (l.product.supplier.price || 0) * l.item.qty, 0);
+    return [
+      `Hello ${s.contactPerson || s.name},`,
+      `New order from ${store?.name || 'our shop'} — ref ${order.code}`,
+      '',
+      ...lines.map((l) => `• ${l.item.qty} × ${l.product.name}${l.product.sku ? ` (code ${l.product.sku})` : ''} — KSh ${(l.product.supplier.price || 0).toLocaleString()} each`),
+      `Total: KSh ${total.toLocaleString()}`,
+      '',
+      delivers
+        ? `Please deliver to:\n${order.name}\n${order.phone}\n${order.address}${order.notes ? `\nNote: ${order.notes}` : ''}`
+        : `Our rider will collect${s.location ? ` from ${s.location}` : ''} today.`,
+      'Please confirm it is available. Asante!',
+    ].join('\n');
+  };
+
+  const markOrdered = async (s: LocalSupplier) => {
+    const tag = tagFor(s);
+    const existing = (order.supplier_order_no || '').split(',').map((x) => x.trim()).filter(Boolean);
+    if (existing.includes(tag)) return;
+    setBusy(s.id);
+    try {
+      const no = [...existing, tag].join(', ');
+      await api(`/orders/${order.code}`, { method: 'PATCH', body: { supplier_order_no: no } });
+      toast('success', `Marked as ordered from ${s.name}`);
+      await onOrdered(no);
+    } catch (e) { toast('error', (e as Error).message); } finally { setBusy(null); }
+  };
+
+  return (
+    <Card title="Order from local supplier">
+      {!canOrder && <div className="mb-3"><Notice tone="warning">Customer payment is <b>not verified</b>. Wait for M-Pesa confirmation before ordering.</Notice></div>}
+      <div className="space-y-4">
+        {[...groups.values()].map(({ supplier, lines }) => {
+          const ordered = (order.supplier_order_no || '').includes(tagFor(supplier));
+          const delivers = Boolean(deliver[supplier.id]);
+          const text = message(supplier, lines, delivers);
+          return (
+            <div key={supplier.id} className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <b>{supplier.name}</b>
+                {ordered ? <Badge tone="green">ordered</Badge> : <Badge tone="amber">not ordered yet</Badge>}
+              </div>
+              {supplier.location && <p className="text-xs text-slate-500">{supplier.location}{supplier.paymentTerms ? ` · ${supplier.paymentTerms}` : ''}</p>}
+              <label className="mt-2 flex items-center gap-2 text-xs"><input type="checkbox" checked={delivers} onChange={(e) => setDeliver({ ...deliver, [supplier.id]: e.target.checked })} /> Supplier delivers to the customer (adds customer name, phone and address)</label>
+              <pre className="mt-2 whitespace-pre-wrap rounded bg-slate-50 p-2 text-xs dark:bg-slate-800">{text}</pre>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <a href={canOrder ? whatsappLink(supplier.phone, text) : undefined} target="_blank" rel="noreferrer" aria-disabled={!canOrder}>
+                  <Button size="sm" disabled={!canOrder} icon={<MessageCircle className="h-3.5 w-3.5" />}>WhatsApp {supplier.name}</Button>
+                </a>
+                <Button size="sm" variant="secondary" icon={<Copy className="h-3.5 w-3.5" />} onClick={() => { void navigator.clipboard.writeText(text); toast('info', 'Message copied'); }}>Copy message</Button>
+                {!ordered && <Button size="sm" variant="secondary" disabled={!canOrder} loading={busy === supplier.id} icon={<CheckCircle2 className="h-3.5 w-3.5" />} onClick={() => markOrdered(supplier)}>Mark as ordered</Button>}
+              </div>
+            </div>
+          );
+        })}
+        <p className="text-xs text-slate-500">After the rider collects, paste the rider's name/phone or parcel number into <b>Tracking number</b> below — the order becomes "shipped".</p>
+      </div>
+    </Card>
   );
 }

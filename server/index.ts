@@ -25,7 +25,7 @@ app.use(helmet({
     },
   },
 }));
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json({ limit: '4mb' })); // photos are compressed in the browser first
 app.use('/api', rateLimit({ windowMs: 60_000, limit: 300, standardHeaders: 'draft-7', legacyHeaders: false }));
 app.get('/healthz', (_req, res) => { res.json({ ok: true }); });
 app.use('/api', api);

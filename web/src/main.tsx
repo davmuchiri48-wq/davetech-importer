@@ -19,6 +19,7 @@ import Automation from './pages/Automation';
 import Analytics from './pages/Analytics';
 import Integrations, { ConnectStore } from './pages/Integrations';
 import SettingsPage from './pages/Settings';
+import Suppliers from './pages/Suppliers';
 
 if (localStorage.getItem('theme') === 'dark' || (!localStorage.getItem('theme') && matchMedia('(prefers-color-scheme: dark)').matches)) {
   document.documentElement.classList.add('dark');
@@ -48,6 +49,7 @@ function Gate() {
         <Route path="sync" element={<Sync />} />
         <Route path="orders" element={<Orders />} />
         <Route path="supplier-orders" element={<SupplierOrders />} />
+        <Route path="suppliers" element={<Suppliers />} />
         <Route path="shipping" element={<Shipping />} />
         <Route path="customers" element={<Customers />} />
         <Route path="payments" element={<Payments />} />

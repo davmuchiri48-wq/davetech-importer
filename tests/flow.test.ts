@@ -122,4 +122,35 @@ describe('import → price → publish', () => {
     expect(t).not.toContain('my-shop-key');
     expect(decrypt(t)).toBe('my-shop-key');
   });
+
+  it('local supplier products: KES price, rider cost, WhatsApp link, editable stock, 1-2 day delivery', async () => {
+    const { normalizeKePhone, whatsappLink } = await import('../shared/types');
+    expect(normalizeKePhone('0712 345 678')).toBe('254712345678');
+    expect(normalizeKePhone('+254 112 345678')).toBe('254112345678');
+    expect(normalizeKePhone('712345678')).toBe('254712345678');
+    expect(normalizeKePhone('12345')).toBeNull();
+    const phone = normalizeKePhone('0712345678')!;
+    const p = await products.createProductFromSnapshot('storeA', snap('local-sup1-lamp', {
+      source: 'local', supplierId: 'sup1', supplierUrl: whatsappLink(phone), currency: 'KES', price: 800, shipping: 200, stock: 4, storeName: 'Eastleigh Gadgets',
+    }));
+    expect(p.supplierId).toBe('sup1');
+    expect(p.pricing!.landedCost).toBe(1100);        // 800 + 200 + 100 extra, rate 1
+    expect(p.pricing!.sellingPrice).toBe(1650);      // +50%
+    expect(p.availability).toBe('available');
+    const out = await products.updateProduct('storeA', p.id, { supplierStock: 0, supplierPrice: 700 } as any);
+    expect(out.availability).toBe('unavailable');
+    expect(out.supplier.price).toBe(700);
+    await products.updateProduct('storeA', p.id, { supplierStock: 3 } as any);
+    await products.publishProduct('storeA', p.id);
+    const put = shopCalls.filter((c) => c[0] === 'put').pop();
+    expect(put[3]).toMatchObject({ supplier_url: 'https://wa.me/254712345678', delivery_days: '1-2 days', price: 1500 });
+  });
+
+  it('AliExpress products keep supplier price locked to sync', async () => {
+    const p = await products.createProductFromSnapshot('storeA', snap('666666666', { source: 'aliexpress_api' }));
+    const out = await products.updateProduct('storeA', p.id, { supplierPrice: 1, supplierStock: 0 } as any);
+    expect(out.supplier.price).toBe(10);
+    expect(out.availability).toBe('unknown');
+  });
 });
+

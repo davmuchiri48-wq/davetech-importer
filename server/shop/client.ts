@@ -66,6 +66,8 @@ export const shop = {
     shopRequest<{ id: number; created: boolean }>(storeId, 'PUT', `/products/${encodeURIComponent(externalId)}`, p),
   removeProduct: (storeId: string, externalId: string) =>
     shopRequest<{ result: 'deleted' | 'hidden' | 'not_found' }>(storeId, 'DELETE', `/products/${encodeURIComponent(externalId)}`),
+  uploadImage: (storeId: string, mime: string, data: string) =>
+    shopRequest<{ url: string; id: number }>(storeId, 'POST', '/images', { mime, data }),
   orders: (storeId: string, params: { since?: string; status?: string; limit?: number } = {}) => {
     const q = new URLSearchParams(Object.entries(params).filter(([, v]) => v != null && v !== '').map(([k, v]) => [k, String(v)]));
     return shopRequest<{ orders: ShopOrder[] }>(storeId, 'GET', `/orders?${q}`);

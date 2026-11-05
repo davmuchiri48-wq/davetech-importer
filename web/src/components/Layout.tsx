@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Search, Download, Package, FolderTree, Calculator, RefreshCw, ShoppingCart, Truck, PackageCheck,
-  Users, CreditCard, Bot, BarChart3, Plug, Settings, Menu, ChevronsLeft, ChevronsRight, Moon, Sun, LogOut, Bell,
+  Users, CreditCard, Bot, Store, BarChart3, Plug, Settings, Menu, ChevronsLeft, ChevronsRight, Moon, Sun, LogOut, Bell,
 } from 'lucide-react';
 import { useSession } from '../lib/session';
 import { api } from '../lib/api';
@@ -19,6 +19,7 @@ export const NAV = [
   { to: '/sync', label: 'Inventory Synchronization', icon: RefreshCw },
   { to: '/orders', label: 'Orders', icon: ShoppingCart },
   { to: '/supplier-orders', label: 'Supplier Orders', icon: PackageCheck },
+  { to: '/suppliers', label: 'Local Suppliers', icon: Store },
   { to: '/shipping', label: 'Shipping & Tracking', icon: Truck },
   { to: '/customers', label: 'Customers', icon: Users },
   { to: '/payments', label: 'Payments', icon: CreditCard },

@@ -62,6 +62,7 @@ export async function createProductFromSnapshot(storeId: string, snap: SupplierS
   const base: Omit<Product, 'id'> = {
     storeId,
     supplierProductId: snap.supplierProductId,
+    supplierId: snap.supplierId ?? null,
     supplier: snap,
     name: edits.name || snap.title,
     slug: `${slugify(edits.name || snap.title)}-${ref.id.slice(0, 5).toLowerCase()}`,
@@ -111,7 +112,12 @@ export async function updateProduct(storeId: string, id: string, patch: Partial<
   const next: any = { ...current };
   for (const k of allowed) if (k in patch) next[k] = (patch as any)[k];
   if ('supplierShipping' in (patch as any)) next.supplier = { ...current.supplier, shipping: (patch as any).supplierShipping };
-  if ('supplierPrice' in (patch as any) && current.supplier.source === 'manual') next.supplier = { ...next.supplier, price: (patch as any).supplierPrice };
+  if ('supplierPrice' in (patch as any) && current.supplier.source !== 'aliexpress_api') next.supplier = { ...next.supplier, price: (patch as any).supplierPrice };
+  if ('supplierStock' in (patch as any) && current.supplier.source !== 'aliexpress_api') {
+    const st = (patch as any).supplierStock as number | null;
+    next.supplier = { ...next.supplier, stock: st };
+    next.availability = st == null ? 'unknown' : st > 0 ? 'available' : 'unavailable';
+  }
   if (current.priceLocked && next.priceLocked === false && !opts.allowUnlock) throw new HttpError(403, 'Only an administrator can unlock a locked price');
   if (next.priceLocked && !(next.manualPrice > 0)) throw new HttpError(400, 'Enter a manual price before locking it');
   if (next.name !== current.name) next.slug = `${slugify(next.name)}-${id.slice(0, 5).toLowerCase()}`;
@@ -182,6 +188,7 @@ export async function publishProduct(storeId: string, id: string, opts: { allowL
     supplier_url: p.supplier.supplierUrl,
     supplier_cost: Math.round(pr.supplierCostConverted + pr.additionalCosts),
     supplier_shipping: Math.round(pr.shippingConverted),
+    delivery_days: p.supplier.source === 'local' ? '1-2 days' : undefined,
     sku: p.sku,
     seo_title: p.seoTitle,
     seo_description: p.seoDescription,

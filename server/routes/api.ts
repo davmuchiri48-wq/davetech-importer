@@ -14,7 +14,7 @@ import { getRate, refreshRates } from '../services/exchange.js';
 import { calculatePrice, resolveRule } from '../../shared/pricing.js';
 import * as products from '../services/products.js';
 import { enqueueImport, syncStore } from '../services/jobs.js';
-import type { SupplierSnapshot, ShopOrder } from '../../shared/types.js';
+import { normalizeKePhone, whatsappLink, type SupplierSnapshot, type ShopOrder } from '../../shared/types.js';
 
 export const api = Router();
 const admin = requireRole('admin');
@@ -278,6 +278,100 @@ api.get('/imports', h(async (req, res) => {
   res.json({ jobs: q.map((d) => ({ id: d.id, ...d.data(), input: undefined })) });
 }));
 
+
+// ---------------- local suppliers (Nairobi wholesalers etc.)
+const supplierBody = z.object({
+  name: z.string().trim().min(2).max(100),
+  contactPerson: z.string().trim().max(80).default(''),
+  phone: z.string().trim().min(9).max(20),
+  location: z.string().trim().max(200).default(''),
+  paymentTerms: z.string().trim().max(200).default(''),
+  deliveryNote: z.string().trim().max(300).default(''),
+  notes: z.string().trim().max(1000).default(''),
+  active: z.boolean().default(true),
+});
+const cleanSupplier = (b: z.infer<typeof supplierBody>) => {
+  const phone = normalizeKePhone(b.phone);
+  if (!phone) throw new HttpError(400, 'Enter a valid Kenyan mobile number, e.g. 0712 345 678', 'bad_phone');
+  return { ...b, phone };
+};
+async function ownSupplier(storeId: string, id: string) {
+  const snap = await col.suppliers().doc(id).get();
+  if (!snap.exists || snap.data()!.storeId !== storeId) throw new HttpError(404, 'Supplier not found');
+  return snap;
+}
+api.get('/suppliers', h(async (req, res) => {
+  const [sup, prods] = await Promise.all([
+    col.suppliers().where('storeId', '==', req.storeId).get(),
+    col.products().where('storeId', '==', req.storeId).get(),
+  ]);
+  const counts: Record<string, number> = {};
+  prods.docs.forEach((d) => { const id = d.get('supplierId'); if (id) counts[id] = (counts[id] || 0) + 1; });
+  res.json({ suppliers: sup.docs.map((d) => ({ id: d.id, ...d.data(), productCount: counts[d.id] || 0 })).sort((a: any, b: any) => a.name.localeCompare(b.name)) });
+}));
+api.post('/suppliers', admin, h(async (req, res) => {
+  const b = cleanSupplier(supplierBody.parse(req.body));
+  const ref = await col.suppliers().add({ storeId: req.storeId, ...b, createdAt: nowIso() });
+  await audit(req.user.uid, req.storeId, 'supplier.created', ref.id, { name: b.name });
+  res.json({ id: ref.id });
+}));
+api.put('/suppliers/:id', admin, h(async (req, res) => {
+  const snap = await ownSupplier(req.storeId, req.params.id);
+  const b = cleanSupplier(supplierBody.parse(req.body));
+  await snap.ref.update({ ...b, updatedAt: nowIso() });
+  // keep the WhatsApp link on this supplier's products current
+  if (b.phone !== snap.get('phone')) {
+    const prods = await col.products().where('storeId', '==', req.storeId).where('supplierId', '==', snap.id).get();
+    await Promise.all(prods.docs.map((d) => d.ref.update({ 'supplier.supplierUrl': whatsappLink(b.phone), 'supplier.storeName': b.name })));
+  }
+  await audit(req.user.uid, req.storeId, 'supplier.updated', snap.id, { name: b.name });
+  res.json({ ok: true });
+}));
+api.delete('/suppliers/:id', admin, h(async (req, res) => {
+  const snap = await ownSupplier(req.storeId, req.params.id);
+  const used = await col.products().where('storeId', '==', req.storeId).where('supplierId', '==', snap.id).limit(1).get();
+  if (!used.empty) throw new HttpError(400, 'This supplier still has products. Delete or move them first, or mark the supplier inactive.');
+  await snap.ref.delete();
+  await audit(req.user.uid, req.storeId, 'supplier.deleted', snap.id);
+  res.json({ ok: true });
+}));
+
+// ---------------- photo upload (stored by the shop, returns a public https link)
+api.post('/uploads/image', h(async (req, res) => {
+  const b = z.object({ mime: z.enum(['image/jpeg', 'image/png', 'image/webp']), data: z.string().min(100).max(3_000_000) }).parse(req.body);
+  res.json(await shop.uploadImage(req.storeId, b.mime, b.data));
+}));
+
+// ---------------- local supplier product
+const localBody = z.object({
+  supplierId: z.string().min(1),
+  name: z.string().trim().min(3).max(200),
+  description: z.string().max(20_000).default(''),
+  images: z.array(z.string().url()).min(1).max(10),
+  wholesalePrice: z.number().positive(),
+  deliveryCost: z.number().min(0),
+  stock: z.number().int().min(0).nullable().default(null),
+  sku: z.string().trim().max(80).default(''),
+  categoryId: z.string().nullable().optional(),
+  manualPrice: z.number().positive().nullable().optional(),
+});
+api.post('/imports/local', h(async (req, res) => {
+  const b = localBody.parse(req.body);
+  const sup = await ownSupplier(req.storeId, b.supplierId);
+  const key = b.sku ? `local-${sup.id}-${b.sku.toLowerCase().replace(/[^a-z0-9-]/g, '')}` : `local-${sup.id}-${crypto.randomBytes(5).toString('hex')}`;
+  const snapshot: SupplierSnapshot = {
+    source: 'local', supplierProductId: key, supplierId: sup.id, supplierUrl: whatsappLink(sup.get('phone')),
+    title: b.name, description: b.description, images: b.images, price: b.wholesalePrice, shipping: b.deliveryCost, currency: 'KES',
+    variants: [], stock: b.stock, storeName: sup.get('name'), fetchedAt: nowIso(),
+  };
+  const p = await products.createProductFromSnapshot(req.storeId, snapshot, {
+    sku: b.sku, categoryId: b.categoryId ?? null,
+    ...(b.manualPrice ? { manualPrice: b.manualPrice, priceLocked: true } : {}),
+  });
+  await audit(req.user.uid, req.storeId, 'import.local', p.id, { supplier: sup.get('name') });
+  res.json({ product: p });
+}));
+
 // ---------------- products
 api.get('/products', h(async (req, res) => {
   const q = await col.products().where('storeId', '==', req.storeId).get();
@@ -294,6 +388,7 @@ const productPatch = z.object({
   categoryId: z.string().nullable(), sku: z.string().max(80), seoTitle: z.string().max(120), seoDescription: z.string().max(320),
   pricingOverride: ruleBody.partial().nullable(), manualPrice: z.number().positive().nullable(), priceLocked: z.boolean(),
   supplierShipping: z.number().min(0).nullable(), supplierPrice: z.number().positive(),
+  supplierStock: z.number().int().min(0).nullable(),
 }).partial();
 api.put('/products/:id', h(async (req, res) => {
   const b = productPatch.parse(req.body);

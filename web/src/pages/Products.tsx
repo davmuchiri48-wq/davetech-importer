@@ -129,7 +129,7 @@ function ProductEditor({ id, categories, onClose, onChanged }: { id: string; cat
     setForm({
       name: p.name, description: p.description, images: p.images, mainImage: p.mainImage, categoryId: p.categoryId || '', sku: p.sku,
       seoTitle: p.seoTitle, seoDescription: p.seoDescription, manualPrice: p.manualPrice ?? '', priceLocked: p.priceLocked,
-      supplierShipping: p.supplier.shipping ?? '', supplierPrice: p.supplier.price ?? '',
+      supplierShipping: p.supplier.shipping ?? '', supplierPrice: p.supplier.price ?? '', supplierStock: p.supplier.stock ?? '',
       overrideMarkup: p.pricingOverride?.markupValue ?? '', overrideType: p.pricingOverride?.markupType || 'percent',
     });
   }, [data]);
@@ -144,7 +144,10 @@ function ProductEditor({ id, categories, onClose, onChanged }: { id: string; cat
         supplierShipping: form.supplierShipping === '' ? null : Number(form.supplierShipping),
         pricingOverride: form.overrideMarkup === '' ? null : { markupType: form.overrideType, markupValue: Number(form.overrideMarkup) },
       };
-      if (data?.product.supplier.source === 'manual' && form.supplierPrice !== '') body.supplierPrice = Number(form.supplierPrice);
+      if (data?.product.supplier.source !== 'aliexpress_api') {
+        if (form.supplierPrice !== '') body.supplierPrice = Number(form.supplierPrice);
+        body.supplierStock = form.supplierStock === '' ? null : Number(form.supplierStock);
+      }
       const r = await api<{ product: Product }>(`/products/${id}`, { method: 'PUT', body });
       setData({ ...data!, product: r.product }); toast('success', 'Saved'); onChanged();
       return true;
@@ -232,8 +235,9 @@ function ProductEditor({ id, categories, onClose, onChanged }: { id: string; cat
           <div className="space-y-4 lg:col-span-2">
             <Card title="Pricing">
               <div className="grid grid-cols-2 gap-3">
-                {p.supplier.source === 'manual' && <Field label={`Supplier price (${p.supplier.currency})`}><input className="input" type="number" step="0.01" {...f('supplierPrice')} /></Field>}
-                <Field label={`Supplier shipping (${p.supplier.currency})`}><input className="input" type="number" step="0.01" min="0" placeholder="unknown" {...f('supplierShipping')} /></Field>
+                {p.supplier.source !== 'aliexpress_api' && <Field label={`Supplier price (${p.supplier.currency})`}><input className="input" type="number" step="0.01" {...f('supplierPrice')} /></Field>}
+                {p.supplier.source !== 'aliexpress_api' && <Field label="Supplier's stock"><input className="input" type="number" min="0" placeholder="unknown" {...f('supplierStock')} /></Field>}
+                <Field label={p.supplier.source === 'local' ? 'Rider / delivery cost (KSh)' : `Supplier shipping (${p.supplier.currency})`}><input className="input" type="number" step="0.01" min="0" placeholder="unknown" {...f('supplierShipping')} /></Field>
                 <Field label="Product markup"><div className="flex gap-1"><input className="input" type="number" min="0" placeholder="rule" {...f('overrideMarkup')} /><select className="input !w-16 !px-1" {...f('overrideType')}><option value="percent">%</option><option value="fixed">KES</option></select></div></Field>
                 <Field label="Manual price (KES)"><input className="input" type="number" min="1" {...f('manualPrice')} /></Field>
                 <label className="col-span-2 flex items-center gap-2 text-sm">
@@ -253,9 +257,9 @@ function ProductEditor({ id, categories, onClose, onChanged }: { id: string; cat
                 </dl>
               ) : <p className="mt-3 text-sm text-slate-500">No price yet — enter the supplier price and save.</p>}
             </Card>
-            <Card title="Supplier (original data)" actions={<Button size="sm" variant="ghost" icon={<RefreshCw className="h-3.5 w-3.5" />} loading={busy === 'sync'} onClick={() => action('sync')}>Synchronize</Button>}>
+            <Card title="Supplier (original data)" actions={p.supplier.source === 'aliexpress_api' && <Button size="sm" variant="ghost" icon={<RefreshCw className="h-3.5 w-3.5" />} loading={busy === 'sync'} onClick={() => action('sync')}>Synchronize</Button>}>
               <dl className="space-y-1 text-sm">
-                <div className="flex justify-between gap-2"><dt className="text-slate-500">Source</dt><dd>{p.supplier.source === 'manual' ? 'Manual import' : 'AliExpress API'}</dd></div>
+                <div className="flex justify-between gap-2"><dt className="text-slate-500">Source</dt><dd>{p.supplier.source === 'manual' ? 'Manual import' : p.supplier.source === 'local' ? 'Local supplier' : 'AliExpress API'}</dd></div>
                 <div className="flex justify-between gap-2"><dt className="text-slate-500">Product id</dt><dd className="font-mono text-xs">{p.supplierProductId}</dd></div>
                 <div className="flex justify-between gap-2"><dt className="text-slate-500">Price</dt><dd>{money(p.supplier.price, p.supplier.currency)}</dd></div>
                 <div className="flex justify-between gap-2"><dt className="text-slate-500">Stock</dt><dd>{p.supplier.stock ?? 'not supplied'}</dd></div>
@@ -263,7 +267,7 @@ function ProductEditor({ id, categories, onClose, onChanged }: { id: string; cat
                 <div className="flex justify-between gap-2"><dt className="text-slate-500">Last checked</dt><dd>{ago(p.lastSyncedAt)}</dd></div>
                 <div className="flex justify-between gap-2"><dt className="text-slate-500">Published</dt><dd>{date(p.lastPublishedAt)}</dd></div>
               </dl>
-              <a className="mt-3 inline-flex items-center gap-1 text-sm text-brand-600" href={p.supplier.supplierUrl} target="_blank" rel="noreferrer"><ExternalLink className="h-3.5 w-3.5" /> View supplier product</a>
+              <a className="mt-3 inline-flex items-center gap-1 text-sm text-brand-600" href={p.supplier.supplierUrl} target="_blank" rel="noreferrer"><ExternalLink className="h-3.5 w-3.5" /> {p.supplier.source === 'local' ? 'WhatsApp supplier' : 'View supplier product'}</a>
               <p className="mt-2 font-medium text-sm">{p.supplier.title}</p>
             </Card>
             {data!.syncHistory.length > 0 && (

@@ -3,7 +3,7 @@ import type { PricingRule, PriceBreakdown } from './pricing.js';
 export type Role = 'admin' | 'staff';
 export type PublicationStatus = 'draft' | 'published' | 'unpublished' | 'archived';
 export type Availability = 'available' | 'unavailable' | 'unknown';
-export type ImportSource = 'aliexpress_api' | 'manual';
+export type ImportSource = 'aliexpress_api' | 'manual' | 'local';
 
 export interface AppUser {
   uid: string;
@@ -46,6 +46,7 @@ export interface SupplierSnapshot {
   stock: number | null;
   categoryName?: string;
   storeName?: string;       // AliExpress seller name if supplied
+  supplierId?: string;      // local supplier (suppliers/ collection)
   fetchedAt: string;
 }
 
@@ -53,6 +54,7 @@ export interface Product {
   id: string;
   storeId: string;
   supplierProductId: string;
+  supplierId?: string | null; // set for local-supplier products
   supplier: SupplierSnapshot;
   // editable store copy
   name: string;
@@ -155,3 +157,30 @@ export interface AuditLog {
   details: Record<string, unknown>;
   at: string;
 }
+
+export interface LocalSupplier {
+  id: string;
+  storeId: string;
+  name: string;            // shop / business name
+  contactPerson: string;
+  phone: string;           // WhatsApp number, stored as 2547XXXXXXXX
+  location: string;        // e.g. "Eastleigh, 1st Avenue, Shop B12"
+  paymentTerms: string;    // e.g. "Pay on pickup", "M-Pesa till 123456"
+  deliveryNote: string;    // e.g. "Rider collects 9am-5pm"
+  notes: string;
+  active: boolean;
+  productCount?: number;
+  createdAt: string;
+}
+
+/** 0712 345 678 / +254712345678 / 254712345678 → 254712345678 (null if not a Kenyan mobile) */
+export function normalizeKePhone(input: string): string | null {
+  const d = String(input || '').replace(/\D/g, '');
+  let n = d;
+  if (/^0[17]\d{8}$/.test(d)) n = '254' + d.slice(1);
+  else if (/^[17]\d{8}$/.test(d)) n = '254' + d;
+  return /^254[17]\d{8}$/.test(n) ? n : null;
+}
+
+export const whatsappLink = (phone: string, text?: string) =>
+  `https://wa.me/${phone}${text ? `?text=${encodeURIComponent(text)}` : ''}`;
