@@ -6,12 +6,18 @@ import { api } from './api';
  */
 export async function compressImage(file: File, max = 1200, quality = 0.82): Promise<{ mime: string; data: string }> {
   if (!file.type.startsWith('image/')) throw new Error(`${file.name} is not a photo`);
-  const url = URL.createObjectURL(file);
-  try {
+  // Read as a data: URL (blob: URLs are blocked by the page's security policy)
+  const url = await new Promise<string>((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result));
+    r.onerror = () => reject(new Error(`Could not read ${file.name}`));
+    r.readAsDataURL(file);
+  });
+  {
     const img = await new Promise<HTMLImageElement>((resolve, reject) => {
       const i = new Image();
       i.onload = () => resolve(i);
-      i.onerror = () => reject(new Error(`Could not read ${file.name}`));
+      i.onerror = () => reject(new Error(`${file.name}: this photo format is not supported by your browser — try a JPG or PNG`));
       i.src = url;
     });
     const scale = Math.min(1, max / Math.max(img.width, img.height));
@@ -24,8 +30,6 @@ export async function compressImage(file: File, max = 1200, quality = 0.82): Pro
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
     const dataUrl = canvas.toDataURL('image/jpeg', quality);
     return { mime: 'image/jpeg', data: dataUrl.split(',')[1] };
-  } finally {
-    URL.revokeObjectURL(url);
   }
 }
 

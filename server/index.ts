@@ -18,7 +18,7 @@ app.use(helmet({
   contentSecurityPolicy: {
     useDefaults: true,
     directives: {
-      'img-src': ["'self'", 'data:', 'https:'],
+      'img-src': ["'self'", 'data:', 'blob:', 'https:'],
       'connect-src': ["'self'", 'https://*.googleapis.com', 'https://*.firebaseio.com', 'https://securetoken.googleapis.com', 'https://identitytoolkit.googleapis.com'],
       'frame-src': ["'self'", 'https://*.firebaseapp.com'],
       'script-src': ["'self'"],
